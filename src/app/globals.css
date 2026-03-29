@@ -137,8 +137,9 @@ h1, h2, h3, h4, h5, h6 {
   padding: 10px 20px;
   display: flex;
   align-items: center;
-  gap: 20px;
+  justify-content: center;
   height: 100px;
+  position: relative;
 }
 
 .id-card-logo-box {
@@ -152,12 +153,12 @@ h1, h2, h3, h4, h5, h6 {
   border-radius: 50%;
   flex-shrink: 0;
   box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+  position: absolute;
+  left: 20px;
 }
 
 .id-card-header-text {
-  flex: 1;
-  text-align: left;
-  
+  text-align: center;
 }
 
 .id-card-header-title {
@@ -165,12 +166,14 @@ h1, h2, h3, h4, h5, h6 {
   font-weight: 800;
   letter-spacing: 1.2px;
   margin-bottom: 2px;
+  /* text-align: center; */
 }
 
 .id-card-header-subtitle {
   font-size: 14px;
   font-weight: 400;
   opacity: 0.9;
+  /* text-align: center; */
 }
 
 
@@ -234,7 +237,7 @@ h1, h2, h3, h4, h5, h6 {
 
 .id-card-field-label {
   font-weight: 500;
-  font-size: 15px;
+  font-size: 18px;
   color: #0f172a;
   min-width: 110px;
 }
@@ -244,7 +247,7 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 .id-card-field-value {
-  font-size: 15px;
+  font-size: 18px;
   color: #1e3a8a;
   word-break: break-all;
   font-weight: 500;
