@@ -4,6 +4,8 @@ import React, { useState, useRef, useEffect } from 'react';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 import * as XLSX from 'xlsx';
+import JSZip from 'jszip';
+import { saveAs } from 'file-saver';
 
 // --- Types ---
 interface DynamicField {
@@ -155,25 +157,125 @@ export default function Home() {
     window.print();
   };
 
+  const handleDownloadSingleImage = async () => {
+    const cardElement = document.getElementById('printable-card');
+    if (!cardElement) return;
+
+    setIsGenerating(true);
+    setProgress({ current: 1, total: 1 });
+
+    const canvas = await html2canvas(cardElement, { 
+      scale: 3,
+      useCORS: true, 
+      allowTaint: true 
+    });
+    const imgData = canvas.toDataURL('image/png');
+    
+    const nameField = data.dynamicFields.find(f => f.label.toLowerCase() === 'name');
+    const fileName = nameField ? `${nameField.value.replace(/\s+/g, '_')}_ID.png` : 'id-card.png';
+    
+    const link = document.createElement('a');
+    link.href = imgData;
+    link.download = fileName;
+    link.click();
+    setIsGenerating(false);
+  };
+
+  const getGoogleDriveDirectLink = (url: string) => {
+    if (!url || typeof url !== 'string') return url;
+    if (url.includes('drive.google.com') || url.includes('docs.google.com')) {
+      const idMatch = url.match(/[-\w]{25,50}/);
+      if (idMatch) return `https://lh3.googleusercontent.com/d/${idMatch[0]}`;
+    }
+    return url;
+  };
+
+  const mapUserDataToIdData = (user: any, baseData: IdData) => {
+    const findValue = (keywords: string[]) => {
+      const key = Object.keys(user).find(k => 
+        keywords.some(kw => k.toLowerCase().includes(kw.toLowerCase()))
+      );
+      return key ? user[key] : null;
+    };
+
+    const photoLink = findValue(['Upload Photo', 'UPLOAD PHOTOGRAPH']) || null;
+    const directPhotoLink = photoLink ? getGoogleDriveDirectLink(photoLink) : baseData.photoUrl;
+
+    return {
+      ...baseData,
+      photoUrl: directPhotoLink,
+      dynamicFields: baseData.dynamicFields.map(f => {
+        const lowerLabel = f.label.toLowerCase();
+        if (lowerLabel === 'name') return { ...f, value: findValue(['NAME (in BLOCK LETTERS)', 'name']) || '' };
+        if (lowerLabel === 'designation') return { ...f, value: findValue(['DESIGNATION']) || '' };
+        if (lowerLabel === 'office') return { ...f, value: findValue(['NAME OF OFFICE', 'office']) || '' };
+        if (lowerLabel === 'pen') return { ...f, value: findValue(['PEN']) || '' };
+        return f;
+      })
+    };
+  };
+
+  const handleDownloadSinglePDF = async () => {
+    const cardElement = document.getElementById('printable-card');
+    if (!cardElement) return;
+
+    setIsGenerating(true);
+    setProgress({ current: 1, total: 1 });
+
+    const pdf = new jsPDF('p', 'mm', 'a4');
+    
+    const cardWidthMm = data.pdfCardWidthMm; 
+    const cardHeightMm = data.pdfCardHeightMm; 
+    const marginX = data.pdfMarginX;
+    const marginY = data.pdfMarginY;
+
+    // Wait a bit to ensure images are loaded
+    await new Promise(r => setTimeout(r, 500));
+
+    const canvas = await html2canvas(cardElement, { 
+      scale: 3,
+      useCORS: true, 
+      allowTaint: true 
+    });
+    const imgData = canvas.toDataURL('image/png');
+    
+    pdf.addImage(imgData, 'PNG', marginX, marginY, cardWidthMm, cardHeightMm);
+    
+    const nameField = data.dynamicFields.find(f => f.label.toLowerCase() === 'name');
+    const fileName = nameField ? `${nameField.value.replace(/\s+/g, '_')}_ID.pdf` : 'id-card.pdf';
+    
+    pdf.save(fileName);
+    setIsGenerating(false);
+  };
+
+  const addToBatch = () => {
+    const newUser: any = {};
+    
+    // Map dynamic fields to keys expected by handleDownloadBulkPDF
+    data.dynamicFields.forEach(field => {
+      const label = field.label.toUpperCase();
+      if (label === 'NAME') newUser['NAME (in BLOCK LETTERS)'] = field.value;
+      else if (label === 'DESIGNATION') newUser['DESIGNATION'] = field.value;
+      else if (label === 'OFFICE') newUser['NAME OF OFFICE'] = field.value;
+      else if (label === 'PEN') newUser['PEN'] = field.value;
+      else newUser[field.label] = field.value;
+    });
+
+    if (data.photoUrl) newUser['Upload Photo'] = data.photoUrl;
+    
+    setBulkData(prev => {
+      const updated = [...prev, newUser];
+      setSelectedIndices(Array.from({ length: updated.length }, (_, i) => i));
+      return updated;
+    });
+    
+    alert('Current ID added to batch list below!');
+  };
+
   const handleDownloadBulkPDF = async () => {
     const cardElement = document.getElementById('printable-card');
     if (!cardElement) return;
 
-    const getGoogleDriveDirectLink = (url: string) => {
-      if (!url || typeof url !== 'string') return url;
-      if (url.includes('drive.google.com') || url.includes('docs.google.com')) {
-        // Look for ID in ?id=... or /d/ID pattern
-        // Regex extracts common Drive IDs (25-50 characters)
-        const idMatch = url.match(/[-\w]{25,50}/);
-        if (idMatch) {
-          // This endpoint is the fastest and has the best CORS support for canvas capture
-          return `https://lh3.googleusercontent.com/d/${idMatch[0]}`;
-        }
-      }
-      return url;
-    };
-
-    // Filter by selected indices if bulkData exists, otherwise use demo
     let dataSource: any[] = [];
     if (bulkData.length > 0) {
       dataSource = selectedIndices.length > 0 
@@ -182,12 +284,12 @@ export default function Home() {
     } else {
       dataSource = [
         { 'NAME (in BLOCK LETTERS)': 'JOHN DOE', 'DESIGNATION': 'ASSISTANT PROFESSOR', 'NAME OF OFFICE': 'OFFICE 1', 'PEN': '11111111' },
-      { 'NAME (in BLOCK LETTERS)': 'SARAH SMITH', 'DESIGNATION': 'LECTURER', 'NAME OF OFFICE': 'OFFICE 2', 'PEN': '22222222' },
-      { 'NAME (in BLOCK LETTERS)': 'MICHAEL BROWN', 'DESIGNATION': 'PRINCIPAL', 'NAME OF OFFICE': 'OFFICE 3', 'PEN': '33333333' },
-      { 'NAME (in BLOCK LETTERS)': 'EMILY DAVIS', 'DESIGNATION': 'COORDINATOR', 'NAME OF OFFICE': 'OFFICE 4', 'PEN': '44444444' },
-      { 'NAME (in BLOCK LETTERS)': 'DAVID WILSON', 'DESIGNATION': 'MANAGER', 'NAME OF OFFICE': 'OFFICE 5', 'PEN': '55555555' },
-      { 'NAME (in BLOCK LETTERS)': 'ANNA WHITE', 'DESIGNATION': 'SECRETARY', 'NAME OF OFFICE': 'OFFICE 6', 'PEN': '66666666' }
-    ];
+        { 'NAME (in BLOCK LETTERS)': 'SARAH SMITH', 'DESIGNATION': 'LECTURER', 'NAME OF OFFICE': 'OFFICE 2', 'PEN': '22222222' },
+        { 'NAME (in BLOCK LETTERS)': 'MICHAEL BROWN', 'DESIGNATION': 'PRINCIPAL', 'NAME OF OFFICE': 'OFFICE 3', 'PEN': '33333333' },
+        { 'NAME (in BLOCK LETTERS)': 'EMILY DAVIS', 'DESIGNATION': 'COORDINATOR', 'NAME OF OFFICE': 'OFFICE 4', 'PEN': '44444444' },
+        { 'NAME (in BLOCK LETTERS)': 'DAVID WILSON', 'DESIGNATION': 'MANAGER', 'NAME OF OFFICE': 'OFFICE 5', 'PEN': '55555555' },
+        { 'NAME (in BLOCK LETTERS)': 'ANNA WHITE', 'DESIGNATION': 'SECRETARY', 'NAME OF OFFICE': 'OFFICE 6', 'PEN': '66666666' }
+      ];
     }
 
     const pdf = new jsPDF('p', 'mm', 'a4');
@@ -200,36 +302,13 @@ export default function Home() {
     const marginY = data.pdfMarginY;
 
     const originalFields = [...data.dynamicFields];
+    const originalPhoto = data.photoUrl;
     
     for (let i = 0; i < dataSource.length; i++) {
       const user = dataSource[i];
+      const newData = mapUserDataToIdData(user, data);
       
-      const findValue = (keywords: string[]) => {
-        const key = Object.keys(user).find(k => 
-          keywords.some(kw => k.toLowerCase().includes(kw.toLowerCase()))
-        );
-        return key ? user[key] : null;
-      };
-
-      const photoLink = findValue(['Upload Photo', 'UPLOAD PHOTOGRAPH']) || null;
-      const directPhotoLink = photoLink ? getGoogleDriveDirectLink(photoLink) : data.photoUrl;
-
-      const newData = {
-        ...data,
-        photoUrl: directPhotoLink,
-        dynamicFields: data.dynamicFields.map(f => {
-          const lowerLabel = f.label.toLowerCase();
-          if (lowerLabel === 'name') return { ...f, value: findValue(['NAME (in BLOCK LETTERS)', 'name']) || '' };
-          if (lowerLabel === 'designation') return { ...f, value: findValue(['DESIGNATION']) || '' };
-          if (lowerLabel === 'office') return { ...f, value: findValue(['NAME OF OFFICE', 'office']) || '' };
-          if (lowerLabel === 'pen') return { ...f, value: findValue(['PEN']) || '' };
-          return f;
-        })
-      };
-      
-      // Using a small trick to wait for state/render and image load
       setData(newData);
-      // Wait significantly longer for Google Drive external images to resolve and load
       await new Promise(r => setTimeout(r, 1500)); 
       
       const canvas = await html2canvas(cardElement, { 
@@ -239,7 +318,6 @@ export default function Home() {
       });
       const imgData = canvas.toDataURL('image/png');
       
-      // Dynamic grid placement
       const col = i % data.pdfGridCols;
       const row = Math.floor(i / data.pdfGridCols) % data.pdfGridRows;
       const cardsPerPage = data.pdfGridCols * data.pdfGridRows;
@@ -247,7 +325,6 @@ export default function Home() {
       const x = col * (cardWidthMm + marginX) + marginX;
       const y = row * (cardHeightMm + marginY) + marginY;
       
-      // Add new page if we exceed cardsPerPage
       if (i > 0 && i % cardsPerPage === 0) {
         pdf.addPage();
       }
@@ -256,10 +333,65 @@ export default function Home() {
       setProgress(prev => ({ ...prev, current: i + 1 }));
     }
     
-    // Restore original data
-    setData(prev => ({ ...prev, dynamicFields: originalFields }));
-    
+    setData(prev => ({ ...prev, photoUrl: originalPhoto, dynamicFields: originalFields }));
     pdf.save('bulk-id-cards.pdf');
+    setIsGenerating(false);
+  };
+
+  const handleDownloadBulkImagesZip = async () => {
+    const cardElement = document.getElementById('printable-card');
+    if (!cardElement) return;
+
+    let dataSource: any[] = [];
+    if (bulkData.length > 0) {
+      dataSource = selectedIndices.length > 0 
+        ? selectedIndices.map(idx => bulkData[idx])
+        : bulkData;
+    } else {
+      dataSource = [
+        { 'NAME (in BLOCK LETTERS)': 'JOHN DOE', 'DESIGNATION': 'ASSISTANT PROFESSOR', 'NAME OF OFFICE': 'OFFICE 1', 'PEN': '11111111' },
+        { 'NAME (in BLOCK LETTERS)': 'SARAH SMITH', 'DESIGNATION': 'LECTURER', 'NAME OF OFFICE': 'OFFICE 2', 'PEN': '22222222' },
+        { 'NAME (in BLOCK LETTERS)': 'MICHAEL BROWN', 'DESIGNATION': 'PRINCIPAL', 'NAME OF OFFICE': 'OFFICE 3', 'PEN': '33333333' }
+      ];
+    }
+
+    const zip = new JSZip();
+    setIsGenerating(true);
+    setProgress({ current: 0, total: dataSource.length });
+
+    const originalFields = [...data.dynamicFields];
+    const originalPhoto = data.photoUrl;
+
+    for (let i = 0; i < dataSource.length; i++) {
+        const user = dataSource[i];
+        const newData = mapUserDataToIdData(user, data);
+        
+        setData(newData);
+        await new Promise(r => setTimeout(r, 1500)); 
+        
+        const canvas = await html2canvas(cardElement, { 
+          scale: 3,
+          useCORS: true, 
+          allowTaint: true 
+        });
+        const imgData = canvas.toDataURL('image/png').replace(/^data:image\/(png|jpg);base64,/, "");
+        
+        const findName = (keywords: string[]) => {
+            const key = Object.keys(user).find(k => 
+                keywords.some(kw => k.toLowerCase().includes(kw.toLowerCase()))
+            );
+            return key ? user[key] : null;
+        };
+        const nameVal = findName(['NAME (in BLOCK LETTERS)', 'name']) || `id_${i+1}`;
+        const fileName = `${String(nameVal).replace(/\s+/g, '_')}.png`;
+        
+        zip.file(fileName, imgData, { base64: true });
+        setProgress(prev => ({ ...prev, current: i + 1 }));
+    }
+
+    setData(prev => ({ ...prev, photoUrl: originalPhoto, dynamicFields: originalFields }));
+    const content = await zip.generateAsync({ type: "blob" });
+    saveAs(content, "id-cards.zip");
     setIsGenerating(false);
   };
 
@@ -589,25 +721,44 @@ export default function Home() {
           ))}
 
           <div className="action-bar">
-            <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => excelInputRef.current?.click()}>
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-                <polyline points="14 2 14 8 20 8"></polyline>
-                <line x1="16" y1="13" x2="8" y2="13"></line>
-                <line x1="16" y1="17" x2="8" y2="17"></line>
-                <polyline points="10 9 9 9 8 9"></polyline>
-              </svg>
-              Import Excel
-              <input type="file" ref={excelInputRef} onChange={handleExcelImport} accept=".xlsx,.xls,.csv" hidden />
-            </button>
-            <button className="btn btn-secondary" style={{ flex: 1 }} onClick={handleDownloadBulkPDF}>
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                <polyline points="7 10 12 15 17 10"></polyline>
-                <line x1="12" y1="15" x2="12" y2="3"></line>
-              </svg>
-              Bulk PDF ({selectedIndices.length || bulkData.length || 6})
-            </button>
+            {/* Single Record Section */}
+            <div className="action-section">
+              <span className="section-title">Manual Generation (Current)</span>
+              <div className="button-grid">
+                <button className="btn btn-primary" onClick={handleDownloadSinglePDF}>
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                  Export PDF
+                </button>
+                <button className="btn btn-primary" onClick={handleDownloadSingleImage}>
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+                  Export image
+                </button>
+                <button className="btn btn-secondary" onClick={addToBatch}>
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                  Add to Batch
+                </button>
+              </div>
+            </div>
+
+            {/* Batch Processing Section */}
+            <div className="action-section">
+              <span className="section-title">Batch Processing</span>
+              <div className="button-grid">
+                <button className="btn btn-secondary" onClick={() => excelInputRef.current?.click()}>
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+                  Import Excel
+                  <input type="file" ref={excelInputRef} onChange={handleExcelImport} accept=".xlsx,.xls,.csv" hidden />
+                </button>
+                <button className="btn btn-secondary" onClick={handleDownloadBulkPDF}>
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                  Bulk PDF ({selectedIndices.length || bulkData.length || 0})
+                </button>
+                <button className="btn btn-secondary" onClick={handleDownloadBulkImagesZip}>
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+                  Bulk Image ({selectedIndices.length || bulkData.length || 0})
+                </button>
+              </div>
+            </div>
           </div>
 
           {bulkData.length > 0 && (
