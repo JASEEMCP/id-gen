@@ -66,7 +66,7 @@ export default function Home() {
     headerColor: '#1e3a8a',
     bodyColor: '#dbeafe',
     headerTextColor: '#ffffff',
-    bannerTextColor: '#1e3a8a',
+    bannerTextColor: 'red',
     bodyTextColor: '#1e3a8a',
     dynamicFields: [
       { id: '1', label: 'Name', value: 'JOHN DOE' },
