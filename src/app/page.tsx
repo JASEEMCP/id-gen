@@ -465,7 +465,7 @@ export default function Home() {
               <div className="id-card-footer">
                 <span className="id-card-signature-label">(Signature)</span>
                 <div className="id-card-footer-middle"></div>
-                <span className="id-card-signature-label">(Signature of ARO)</span>
+                <span className="id-card-signature-label">(Signature of RO)</span>
                 <div className="id-card-signature-line">
                   {data.signatureUrl && (
                     <img
